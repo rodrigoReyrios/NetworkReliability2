@@ -8,7 +8,8 @@ import pickle
 import time
 from scipy.special import comb as choose
 from sage.graphs.graph_generators import graphs
-
+from copy import deepcopy
+import math
 
 ##############################################################################################
 #Tiny Utility functions
@@ -229,6 +230,7 @@ def RemSubGraphInPlace(G,sub,typ='E'):
 
 ##################################################################################################
 #Precomputation functions
+
 def task(tup):
     '''
     task for uses in GetGG multithreading function, for some reason this cant be in the 
@@ -240,14 +242,98 @@ def task(tup):
     return [Gnm,tup]
 
 def task2(pair):
+    '''
+    Copy of task it seems, i dont recall why i needed this
+    '''
     n,m = pair
     return [m,list(graphs(n,size=m))]
 
 def task3(key):
+    '''
+    Task to compute components under a certain amount of vertices for a type of k
+    '''
     np,sym,typ,k,dirs,prints,prints2 = key
     #run the function
     CL = CompLibSingleK(np=np,sym=sym,typ=typ,k=k,dirs=dirs,prints=prints,prints2=prints2)
     return [k,CL]
+
+def task4(G):
+    '''
+    Task to take ina graph and compute its components and return them in pairs (order,size,components)
+    '''
+    #trim the graph of singletons
+    SingletonTrim(G)
+    #split the graph among components
+    ComponentsToAdd = []
+    for H in G.connected_components_subgraphs():
+        H = H.copy(immutable=True)
+        #get the size and order of this component
+        ni = H.order()
+        mi = H.size()
+        ComponentsToAdd.append([ni,mi,H])
+    return ComponentsToAdd
+
+def task5ChiE(key):
+    '''
+    Task meant to be used as a wrapper to ompute a components value for Chi_E^k
+    also checks if graph is complete and does a shortcut if so
+    '''
+    k,ni,mi,H = key
+    maxn = Choose(ni,2)
+    if mi==maxn:
+        ChiEkComplete(ni,k)
+    elif mi==(maxn-1):
+        ChiEkCompleteMinusOne(ni,k)
+    #define the computation I want
+    Comp = lambda H: MinMax(H,sym ='Chi',typ='E',k=k)
+    return k,ni,mi,H,Comp(H)
+
+def task5ChiV(key):
+    '''
+    Task meant to be used as a wrapper to ompute a components value for Chi_V^k
+    also checks if graph is complete and does a shortcut if so
+    '''
+    k,ni,mi,H = key
+    maxn = Choose(ni,2)
+    if mi==maxn:
+        ChiVkComplete(ni,k)
+    elif mi==(maxn-1):
+        ChiVkCompleteMinusOne(ni,k)
+    #define the computation I want
+    Comp = lambda H: MinMax(H,sym ='Chi',typ='V',k=k)
+    return k,ni,mi,H,Comp(H)
+
+def task5LmbE(key):
+    '''
+    Task meant to be used as a wrapper to ompute a components value for Lmb_E^k
+    also checks if graph is complete and does a shortcut if so
+    '''
+    k,ni,mi,H = key
+    maxn = Choose(ni,2)
+    if mi==maxn:
+        LmbEkComplete(ni,k)
+    elif mi==(maxn-1):
+        LmbEkCompleteMinusOne(ni,k)
+    #define the computation I want
+    Comp = lambda H: MinMax(H,sym ='Lmb',typ='E',k=k)
+    return k,ni,mi,H,Comp(H)
+
+def task5LmbV(key):
+    '''
+    Task meant to be used as a wrapper to ompute a components value for Lmb_V^k
+    also checks if graph is complete and does a shortcut if so
+    '''
+    k,ni,mi,H = key
+    maxn = Choose(ni,2)
+    if mi==maxn:
+        LmbVkComplete(ni,k)
+    elif mi==(maxn-1):
+        LmbVkCompleteMinusOne(ni,k)
+    #define the computation I want
+    Comp = lambda H: MinMax(H,sym ='Lmb',typ='V',k=k)
+    return k,ni,mi,H,Comp(H)
+
+#the above task are meant to be passed into multithreading expressions
 
 def GetGG(n_max,Multi=False,threads=2):
     '''
@@ -260,11 +346,11 @@ def GetGG(n_max,Multi=False,threads=2):
     #also make a keys list
     Keys = []
 
-    Nrange = range(3,n_max+1)
+    Nrange = range(1,n_max+1)
     #premake all the keys
     for ni in Nrange:
         GG[ni] = {}
-        for mi in range(2, Choose(ni,2)-1 ):
+        for mi in range(0, Choose(ni,2)+1 ):
             GG[ni][mi] = None
             Keys.append((ni,mi))
 
@@ -300,7 +386,7 @@ def GetGGSingleN(n,Multi=False,threads=2):
     #initalize GG file
     GG = {n:{}}
     #compuite the mrange
-    Ms = [[n,m] for m in range(2, Choose(n,2)-1 )]
+    Ms = [[n,m] for m in range(0, Choose(n,2)+1 )]
     
     if not Multi:
         for pair in Ms:
@@ -317,7 +403,7 @@ def GetGGSingleN(n,Multi=False,threads=2):
 
     return GG
 
-def GenGG(n_max,Multi=False,threads=2):
+def GenGG(n_max,Multi=False,threads=2,dirs=None):
     '''
     Runs GetGG and automaticly saves it to a pickle file named after its n_max paramater
     Also keeps track of how long it touk to generate the Gnm sets
@@ -333,9 +419,12 @@ def GenGG(n_max,Multi=False,threads=2):
     GG = {'runtime(sec)':runtime, 'Data':GGData}
 
     #genertae a file name based on n_max
-    filename = f'GG_n{n_max}.pkl'
+    if dirs is None:
+        filename = f'GG_n{n_max}.pkl'
+    else:
+        filename = dirs + f'/GG_n{n_max}.pkl'
     print(f'Saving to file: {filename}')
-    
+
     #pickle the data
     outfile = open(filename,'wb')
     pickle.dump(GG,outfile)
@@ -361,7 +450,7 @@ def CompLibSingleK(np,sym,typ,k,dirs=None,prints=False,prints2=False):
 
     #start a timer
     start = time.perf_counter()
-    for m in range(2, Choose(np,2)-1 ):
+    for m in range(0, Choose(np,2)+1 ):
         #Look for the generator
         Gnm = None
         try:
@@ -417,6 +506,7 @@ def CompLibSingleK(np,sym,typ,k,dirs=None,prints=False,prints2=False):
 def GetCompLib(np,sym,typ,ks,dirs=None,prints=False,prints2=False,Multi=False,threads=2):
     '''
     Runs CompLibSIngleK to an array of Ks specified by the arguments
+    can use multiple threads for each k
     '''
 
     #initate a return dictionary
@@ -426,7 +516,7 @@ def GetCompLib(np,sym,typ,ks,dirs=None,prints=False,prints2=False,Multi=False,th
     if not Multi:
         for k in ks:
             #run CompLib Single K for this K
-            NMK[k] = CompLibSingleK(np=np,sym=sym,typ=typ,k=k,dirs=dirs,prints=prints,prints2=prints2)
+            NMK[k] = CompLibSingleK(np=np,sym=sym,typ=typ,k=k,dirs=dirs,prints=prints,prints2=prints)
             if prints:
                 print(f"K={k} Finished")
         return NMK
@@ -445,6 +535,9 @@ def GetCompLib(np,sym,typ,ks,dirs=None,prints=False,prints2=False,Multi=False,th
         return NMK
 
 def GenCompLib(np,sym,typ,ks,dirs=None,prints=False,prints2=False,Multi=False,threads=2):
+    '''
+    Wraps GetCompLib and automaticly pickles the file, k's used, and runtime
+    '''
     
     ks = [int(k) for k in ks]
     
@@ -470,7 +563,11 @@ def GenCompLib(np,sym,typ,ks,dirs=None,prints=False,prints2=False,Multi=False,th
             Kstr += ','+str(k)
 
     #make a file name CompLib_#_Sym_Typ_k###.pkl
-    filename = f'CompLib_n{np}_{sym}_{typ}_k{Kstr}.pkl'
+    if dirs is None:
+        filename = f'CompLib_n{np}_{sym}_{typ}_k{Kstr}.pkl'
+    else:
+        filename = dirs + f'/CompLib_n{np}_{sym}_{typ}_k{Kstr}.pkl'
+    print(f'Saving to file: {filename}')
 
     #Now I want ot save a dictionary with runtime,Data, and K list
     CompLib = {'runtime(sec)':runtime,'Data':CompLibData, 'K':list(ks)}
@@ -479,6 +576,190 @@ def GenCompLib(np,sym,typ,ks,dirs=None,prints=False,prints2=False,Multi=False,th
     outfile = open(filename,'wb')
     pickle.dump(CompLib,outfile)
     outfile.close()
+
+def GetCompLibExp(np,sym='Chi',typ='E',Krange=[2],dirs=None,threads=2):
+    '''
+    Experimental use of GenCompLib that multithreads it more. Can be slower for small n, but otherwise
+    spreads computation better over cores
+    '''
+    #load up the GG files
+    GGFile = LoadGG(dirs=dirs)
+
+    #acces the GGData from the GGFile
+    GG = GGFile['Data']
+
+    #now I need to init a dictionary I want to divy up the Gnm components into
+    Components = {Krange[0]:{}}
+    maxn = np
+    maxm = max(GG[maxn].keys())
+
+    #make new list just of graphs
+    AllGraphs = []
+    #For the pruposes of divying up, I get all graphs ina single list
+    for Gnm in GG[maxn].values():
+        AllGraphs += Gnm
+
+    #for now I just need 1 K since theyll all be the same from there
+    #At the same time Ill make the keys
+    for ni in range(2,maxn+1):
+        Components[Krange[0]][ni] = {}
+        for mi in range(0,Choose(ni,2)+1):
+            Components[Krange[0]][ni][mi] = {}
+
+    #Now I run task 4 over the threads
+    with concurrent.futures.ProcessPoolExecutor(max_workers = int(threads)) as executor:
+        ress = executor.map(task4,AllGraphs)
+        for res in ress:
+            if res==None:
+                pass
+            else:
+                for ni,mi,H in res:
+                    #see if this i already isomorphic to something
+                    Site = Components[Krange[0]][ni][mi]
+                    iso = GraphSetCompare(H,Site)
+                    if iso is None:
+                        Components[Krange[0]][ni][mi][H] = None
+
+    #now the components should be divyed up into the Components so I now need to clone
+    #for each k key
+    for k in Krange[1:]:
+        Components[k] = deepcopy(Components[Krange[0]])
+
+    #I dont need Allgraphs,GG, or GGFile anymore
+    del AllGraphs
+    del GG
+    del GGFile
+
+
+    #Now I need to run computations on each of these components
+    #make the keys
+    Keys = []
+    for k in Krange:
+        for ni in range(2,maxn+1):
+            for mi in range(0,Choose(ni,2)+1):
+                for H in Components[k][ni][mi].keys():
+                    Keys.append([k,ni,mi,H])
+
+    #now I run task 5 on all the keys eith a diffrent task based on inputs
+    if sym=='Chi':
+        if typ=='E':
+            with concurrent.futures.ProcessPoolExecutor(max_workers = int(threads)) as executor:
+                ress = executor.map(task5ChiE,Keys)
+                for res in ress:
+                    if res==None:
+                        pass
+                    else:
+                        k,ni,mi,H,val = res
+                        Components[k][ni][mi][H] = val
+        elif typ=='V':
+                with concurrent.futures.ProcessPoolExecutor(max_workers = int(threads)) as executor:
+                    ress = executor.map(task5ChiV,Keys)
+                    for res in ress:
+                        if res==None:
+                            pass
+                        else:
+                            k,ni,mi,H,val = res
+                            Components[k][ni][mi][H] = val
+
+    elif sym=='Lmb':
+        if typ=='E':
+                with concurrent.futures.ProcessPoolExecutor(max_workers = int(threads)) as executor:
+                    ress = executor.map(task5LmbE,Keys)
+                    for res in ress:
+                        if res==None:
+                            pass
+                        else:
+                            k,ni,mi,H,val = res
+                            Components[k][ni][mi][H] = val
+        elif typ=='V':
+                with concurrent.futures.ProcessPoolExecutor(max_workers = int(threads)) as executor:
+                    ress = executor.map(task5LmbV,Keys)
+                    for res in ress:
+                        if res==None:
+                            pass
+                        else:
+                            k,ni,mi,H,val = res
+                            Components[k][ni][mi][H] = val
+
+    return Components
+
+def GenCompLibExp(np,sym='Chi',typ='E',Krange=[2],dirs=None,threads=2):
+    '''
+    Wraps GetCompLib experimental
+    '''
+    #start a timer
+    st = time.perf_counter()
+    #actualy make the computation
+    KNMlib = GetCompLibExp(np=np,sym=sym,typ=typ,Krange=Krange,dirs=dirs,threads=threads)
+    en = time.perf_counter()
+    runtime = en -st
+
+    #this snippit of code geenrate a string of ks as list if they arentconsequtive
+    #or a mink-maxk string if they are
+    lencond = len( set( npp.diff( Krange ) ) ) == 1
+    onecond = 1 in npp.unique(npp.diff(Krange))
+
+    if len(Krange)==1:
+        Kstr = f'{Krange[0]}'
+    elif onecond and lencond:
+        Kstr = f'{Krange[0]}-{Krange[-1]}'
+    else:
+        Kstr = str(Krange[0])
+        for k in Krange[1:]:
+            Kstr += ','+str(k)
+
+    #make a file name CompLib_#_Sym_Typ_k###.pkl
+    if dirs is None:
+        filename = f'CompLib_n{np}_{sym}_{typ}_k{Kstr}.pkl'
+    else:
+        filename = dirs + f'/CompLib_n{np}_{sym}_{typ}_k{Kstr}.pkl'
+    print(f'Saving to file: {filename}')
+
+    #Now I want ot save a dictionary with runtime,Data, and K list
+    CompLib = {'runtime(sec)':runtime,'Data':KNMlib, 'K':list(Krange)}
+
+    #pickle the file
+    outfile = open(filename,'wb')
+    pickle.dump(CompLib,outfile)
+    outfile.close()
+
+##################################################################################################
+#Shortuct functions
+#I use formulas for COmlete graphs since they are fairly large
+def LmbEkComplete(n,k):
+    if k>=n:
+        return 0
+    else:
+        return (Choose(n,2)-((math.floor(n/2))*k))
+def LmbVkComplete(n,k):
+    if k>=n:
+        return 0
+    else:
+        return (n-k-(k%2))
+def ChiEkComplete(n,k):
+    return (Choose(n,2) - math.floor(((k-1)*(n**2))/(2*k)))
+def ChiVkComplete(n,k):
+    if k>=n:
+        return 0
+    else:
+        return (n-k)
+
+
+##These formulas havent been proved but they seem ok and intuitive
+def LmbEkCompleteMinusOne(n,k):
+    return max(LmbEkComplete(n,k)-1,0)
+
+def LmbVkCompleteMinusOne(n,k):
+    if k!=2:
+        return LmbVkComplete(n,k)
+    else:
+        return max(0,LmbVkComplete(n,k)-1)
+
+def ChiEkCompleteMinusOne(n,k):
+    return max(0,ChiEkComplete(n,k)-1)
+
+def ChiVkCompleteMinusOne(n,k):
+    return max(0,ChiVkComplete(n,k)-1)
 
 
 ###################################################################################################
